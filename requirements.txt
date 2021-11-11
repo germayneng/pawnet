@@ -1,0 +1,7 @@
+click
+matplotlib
+jupyter
+notebook
+Sphinx
+flake8
+pytest

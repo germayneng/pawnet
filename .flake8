@@ -1,0 +1,9 @@
+[flake8]
+# W503: Line breaks should occur after the binary operator to keep all variable names aligned.
+# E203: Whitespace before ':'
+# E266: Too many leading '#' for block comment 
+# B006: Do not use mutable data structures for argument defaults. E.g. https://medium.com/python-features/how-to-avoid-classic-pitfall-while-passing-default-values-in-python-7002c0dc4c7c
+# B008: Do not perform function calls in argument defaults.
+# F841: Local variable name is assigned to but never used
+ignore = W503, E203, E266, B006, B008, F841
+max-line-length = 79
