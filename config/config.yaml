@@ -1,0 +1,7 @@
+filepath:
+  kaggle: /kaggle/input/petfinder-pawpularity-score/
+  gcs: 
+
+model:
+  pretrained: resnet34
+  

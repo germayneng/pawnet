@@ -10,3 +10,6 @@
 
 # notebook
 notebook/.ipynb_checkpoints
+
+# mac
+.DS_Store
