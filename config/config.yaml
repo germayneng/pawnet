@@ -4,4 +4,7 @@ filepath:
 
 model:
   pretrained: resnet34
-  
+  n_splits: 5 # skf 
+  epoch: 20
+  batch_size: 64
+  num_workers: 4
