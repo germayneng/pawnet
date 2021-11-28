@@ -13,3 +13,6 @@ notebook/.ipynb_checkpoints
 
 # mac
 .DS_Store
+
+
+*.ckpt
