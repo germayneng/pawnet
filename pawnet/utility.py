@@ -302,3 +302,39 @@ class pawNetBasic(pl.LightningModule):
         scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(opt,T_0=20,eta_min=1e-4)
   
         return [opt]
+
+
+def mixup(images,labels,alpha=0.2):
+    """
+    Mixup - to be applied in training loop
+    on batches of images and labels
+
+    Parameters
+    ----------
+    images : torch tensor
+        batch of images (N,C,H,W)
+    label : torch tensor
+        batch of labels (N)
+    alpha : float, optional
+        beta distribution concentration, by default 0.2
+        between 0 and 1
+    """
+    # shuffle images
+    # https://discuss.pytorch.org/t/shuffling-a-tensor/25422/9
+    indices = torch.randperm(len(images))
+    new_images = images[indices].view(images.size())
+    
+    # shuffle target
+    new_labels = labels[indices].view(labels.size())
+
+    # sample from beta distribution
+    beta_distribution = torch.distributions.beta.Beta(alpha,alpha)
+    t = beta_distribution.sample(sample_shape=torch.Size([len(images)]))
+
+    # create beta weights
+    tx = t.view(-1,1,1,1)
+    ty = t.view(-1)
+    x = (images * tx) + (new_images * (1-tx))
+    y = labels * ty + new_labels * (1-ty)
+
+    return x,y
