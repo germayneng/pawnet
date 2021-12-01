@@ -189,6 +189,13 @@ class pawNetBasic(pl.LightningModule):
             in_chans=3
         )
         self.model_config = model_config
+        # get mixup parameter
+        if self.model_config.mixup is not None:
+            print("will perform mixup")
+            self.mixup_alpha = self.model_config.mixup.alpha
+        else:
+            self.mixup_alpha = None
+
         
         # create layers based on pretrained model selected (this affects the feature map size)
         # self.global_avg_pooling = torch.nn.AdaptiveAvgPool2d(1) # timm pretrain comes with pooling    
@@ -229,8 +236,16 @@ class pawNetBasic(pl.LightningModule):
         images, labels = batch
         labels = labels.float() / 100.0
         
-        logits = self.forward(images).squeeze(1)
-        loss = self._criterion(logits, labels)
+        # check for mixup and only for train
+
+        if (self.mixup_alpha is not None) & (mode == "train"):
+            # perform mixup
+            x,y = mixup(images,labels,alpha=self.mixup_alpha)
+            logits = self.forward(x).squeeze(1)
+            loss = self._criterion(logits, y)
+        else:
+            logits = self.forward(images).squeeze(1)
+            loss = self._criterion(logits, labels)
         
         # return logloss for training mode, scaled for others
         pred = logits.sigmoid().detach().cpu() * 100.
@@ -304,7 +319,7 @@ class pawNetBasic(pl.LightningModule):
         return [opt]
 
 
-def mixup(images,labels,alpha=0.2):
+def mixup(images,labels,alpha=0.2, device = "cuda"):
     """
     Mixup - to be applied in training loop
     on batches of images and labels
@@ -321,7 +336,7 @@ def mixup(images,labels,alpha=0.2):
     """
     # shuffle images
     # https://discuss.pytorch.org/t/shuffling-a-tensor/25422/9
-    indices = torch.randperm(len(images))
+    indices = torch.randperm(len(images)).to(device)
     new_images = images[indices].view(images.size())
     
     # shuffle target
@@ -329,7 +344,7 @@ def mixup(images,labels,alpha=0.2):
 
     # sample from beta distribution
     beta_distribution = torch.distributions.beta.Beta(alpha,alpha)
-    t = beta_distribution.sample(sample_shape=torch.Size([len(images)]))
+    t = beta_distribution.sample(sample_shape=torch.Size([len(images)])).to(device)
 
     # create beta weights
     tx = t.view(-1,1,1,1)
