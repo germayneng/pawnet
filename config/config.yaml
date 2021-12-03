@@ -90,3 +90,63 @@ model:
     feature_map_out_size: 768 # the last feature map dim size
     mixup:
       alpha: 0.4
+  # AVG models ==========================================================
+  swin_tiny4_w7_224_m04_swa:
+    model_name: swin_tiny4_w7_224_mixup04_swa # for tensorboard
+    pretrained: swin_tiny_patch4_window7_224
+    n_splits: 5 # skf
+    epoch: 20
+    batch_size: 64
+    num_workers: 4
+    # params
+    dropout: 0.2
+    learning_rate: 0.00001
+    feature_map_out_size: 768 # the last feature map dim size
+    mixup:
+      alpha: 0.4
+    average:
+      type: "swa"
+      start: 10 # 75% of epochs?
+  swin_tiny4_w7_224_m04_ema:
+    model_name: swin_tiny4_w7_224_mixup04_ema # for tensorboard
+    pretrained: swin_tiny_patch4_window7_224
+    n_splits: 5 # skf
+    epoch: 20
+    batch_size: 64
+    num_workers: 4
+    # params
+    dropout: 0.2
+    learning_rate: 0.00001
+    feature_map_out_size: 768 # the last feature map dim size
+    mixup:
+      alpha: 0.4
+    average:
+      type: "ema"
+      start: 1 # 75% of epochs?
+  # larger models ==========================================================
+  swin_large4_w7_224_m04:
+    model_name: pawnet_lightning_swin_large4_w7_224_mixup04 # for tensorboard
+    pretrained: swin_large_patch4_window7_224
+    n_splits: 5 # skf
+    epoch: 20
+    batch_size: 32
+    num_workers: 4
+    # params
+    dropout: 0.5
+    learning_rate: 0.00001
+    feature_map_out_size: 1536 # the last feature map dim size
+    mixup:
+      alpha: 0.4
+  vit_large16_224:
+    model_name: pawnet_lightning_vit_large_patch16_224 # for tensorboard
+    pretrained: vit_large_patch16_224
+    n_splits: 5 # skf
+    epoch: 20
+    batch_size: 16
+    num_workers: 4
+    # params
+    dropout: 0.5
+    learning_rate: 0.00001
+    feature_map_out_size: 1024 # the last feature map dim size
+    mixup:
+      alpha: 0.4

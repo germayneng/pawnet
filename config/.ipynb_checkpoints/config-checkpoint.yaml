@@ -1,0 +1,60 @@
+filepath:
+  kaggle: /kaggle/input/petfinder-pawpularity-score/
+  gcs: ../data/
+
+model:
+  resnet34:
+    model_name: pawnet_lightning_resnet # for tensorboard
+    pretrained: resnet34
+    n_splits: 5 # skf 
+    epoch: 20
+    batch_size: 64
+    num_workers: 4
+    # params
+    dropout: 0.2
+    learning_rate: 0.00001
+    feature_map_out_size: 512 # the last feature map dim size
+  densenet121:
+    model_name: pawnet_lightning_densenet # for tensorboard
+    pretrained: densenet121
+    n_splits: 5 # skf 
+    epoch: 20
+    batch_size: 64
+    num_workers: 4
+    # params
+    dropout: 0.2
+    learning_rate: 0.00001
+    feature_map_out_size: 1024 # the last feature map dim size
+  vit_tiny16_224:
+    model_name: pawnet_lightning_vit_tiny_patch16_224 # for tensorboard
+    pretrained: vit_tiny_patch16_224
+    n_splits: 5 # skf 
+    epoch: 20
+    batch_size: 64
+    num_workers: 4
+    # params
+    dropout: 0.2
+    learning_rate: 0.00001
+    feature_map_out_size: 192 # the last feature map dim size
+  efficientnet_b0:
+    model_name: pawnet_lightning_efficientnet_b0 # for tensorboard
+    pretrained: efficientnet_b0
+    n_splits: 5 # skf 
+    epoch: 20
+    batch_size: 64
+    num_workers: 4
+    # params
+    dropout: 0.2
+    learning_rate: 0.00001
+    feature_map_out_size: 1280 # the last feature map dim size
+  swin_tiny4_w7_224:
+    model_name: pawnet_lightning_swin_tiny4_w7_224 # for tensorboard
+    pretrained: swin_tiny_patch4_window7_224
+    n_splits: 5 # skf
+    epoch: 20
+    batch_size: 64
+    num_workers: 4
+    # params
+    dropout: 0.2
+    learning_rate: 0.00001
+    feature_map_out_size: 768 # the last feature map dim size
