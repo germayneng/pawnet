@@ -122,7 +122,7 @@ model:
       alpha: 0.4
     average:
       type: "ema"
-      start: 1 # 75% of epochs?
+      start: 1
   # larger models ==========================================================
   swin_large4_w7_224_m04:
     model_name: pawnet_lightning_swin_large4_w7_224_mixup04 # for tensorboard

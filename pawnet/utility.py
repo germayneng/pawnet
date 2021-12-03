@@ -34,6 +34,13 @@ from torch.optim.swa_utils import AveragedModel, SWALR
 
 from timm import create_model
 
+
+
+
+#################################
+# General utilities
+#################################
+
 # def seed_everything(seed=1234):
 #     """
 #     Utility function to seed everything
@@ -45,6 +52,7 @@ from timm import create_model
 #     torch.manual_seed(seed)
 #     torch.cuda.manual_seed(seed)
 #     torch.backends.cudnn.deterministic = True
+
 
 def read_yaml(filename):
     """
@@ -72,6 +80,11 @@ class BaseConfigLoader:
     def load_config(self):
         return AttrDict(self.config)
 
+
+
+#################################
+# Torch data
+#################################
 
 class pawnetDataset(torch.utils.data.Dataset):
     """
@@ -141,6 +154,11 @@ class PetfinderDataModule(LightningDataModule):
         val_data = pawnetDataset(annotation_df=self._val_df,img_dir = self.img_dir, transform = self.test_transformation)
         return torch.utils.data.DataLoader(val_data,batch_size=self.batch_size,num_workers =self.num_workers, shuffle=False, pin_memory=False)
 
+
+
+#################################
+# Torch models
+#################################
 
 
 class pawNetBasic(pl.LightningModule):
@@ -424,8 +442,16 @@ class pawNetAdvance(pl.LightningModule):
             self.mixup_alpha = self.model_config.mixup.alpha
         else:
             self.mixup_alpha = None
-        
+
+        # create layers based on pretrained model selected (this affects the feature map size)
+        # self.global_avg_pooling = torch.nn.AdaptiveAvgPool2d(1) # timm pretrain comes with pooling    
+        self.linear_1 = torch.nn.Linear(in_features=self.model_config.feature_map_out_size,out_features=1000)
+        self.prelu = torch.nn.PReLU()
+        self.linear_2 = torch.nn.Linear(in_features=1000,out_features=1)
+
+
         # determine if to average =====
+        # note that this needs to be after we init all torch layers
         # https://forums.pytorchlightning.ai/t/stochastic-weight-averaging/400
         # https://pytorch.org/blog/pytorch-1.6-now-includes-stochastic-weight-averaging/
         if self.model_config.average.type == "swa":
@@ -438,14 +464,6 @@ class pawNetAdvance(pl.LightningModule):
         elif self.model_config.average is None:
             self.wa_model = None
             self.wa_start = None
-        
-        
-        
-        # create layers based on pretrained model selected (this affects the feature map size)
-        # self.global_avg_pooling = torch.nn.AdaptiveAvgPool2d(1) # timm pretrain comes with pooling    
-        self.linear_1 = torch.nn.Linear(in_features=self.model_config.feature_map_out_size,out_features=1000)
-        self.prelu = torch.nn.PReLU()
-        self.linear_2 = torch.nn.Linear(in_features=1000,out_features=1)
         
     def forward(self,x):
         out = self.pretrained(x)
@@ -517,11 +535,11 @@ class pawNetAdvance(pl.LightningModule):
         # update scheduler , parameters
         
         # sch = self.lr_schedulers()[0]
-        swa_sch = self.lr_schedulers()
+        # swa_sch = self.lr_schedulers()
         if self.wa_model is not None:
             if self.current_epoch > self.wa_start:
                 self.wa_model.update_parameters(self)
-                swa_sch.step()
+                # swa_sch.step()
         # else:
         #     sch.step()
 
@@ -584,6 +602,269 @@ class pawNetAdvance(pl.LightningModule):
         # TODO: add learning rate to config
         opt = torch.optim.AdamW(self.parameters(),lr=self.lr)
         # scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(opt,T_0=20,eta_min=1e-4)
-        swa_scheduler = SWALR(opt,anneal_strategy="linear", anneal_epochs=5, swa_lr=0.05)
+        # swa_scheduler = SWALR(opt,anneal_strategy="linear", anneal_epochs=5, swa_lr=0.05)
   
-        return [opt], [swa_scheduler]
+        return [opt]
+
+class pawNetNovel(pl.LightningModule):
+    """
+    Our own novel architecture (?)
+
+    """
+    
+    
+    def __init__(self,criterion, model_config):
+        """
+
+        Parameters
+        ----------
+        criterion : [type]
+            torch loss criterion
+        model_config : 
+            attrDict object from base_config_manager.load_config().XXmodel
+        dropout : float, optional
+            dropout, by default 0.5
+        lr : float, optional
+            learning rate, by default 0.00001
+        """
+        super().__init__()
+        self.dropout = model_config.dropout
+        self.lr = model_config.learning_rate
+        self._criterion = criterion        
+        # initialize layers
+        # https://fastai.github.io/timmdocs/tutorial_feature_extractor
+        # remove FCL by setting num_classes=0
+        self.pretrained = create_model(
+            model_config.pretrained, 
+            pretrained=True, 
+            num_classes=0, 
+            in_chans=3
+        )
+        self.model_config = model_config
+
+        # Important: This property activates manual optimization.
+        self.automatic_optimization = False
+
+        # get mixup parameter
+        if self.model_config.mixup is not None:
+            print("will perform mixup")
+            self.mixup_alpha = self.model_config.mixup.alpha
+        else:
+            self.mixup_alpha = None
+
+        # create layers based on pretrained model selected (this affects the feature map size)
+        # self.global_avg_pooling = torch.nn.AdaptiveAvgPool2d(1) # timm pretrain comes with pooling    
+        self.linear_1 = torch.nn.Linear(in_features=self.model_config.feature_map_out_size,out_features=1000)
+        self.prelu = torch.nn.PReLU()
+        self.linear_2 = torch.nn.Linear(in_features=1000,out_features=1)
+
+
+        # determine if to average =====
+        # note that this needs to be after we init all torch layers
+        # https://forums.pytorchlightning.ai/t/stochastic-weight-averaging/400
+        # https://pytorch.org/blog/pytorch-1.6-now-includes-stochastic-weight-averaging/
+        if self.model_config.average.type == "swa":
+            self.wa_model = AveragedModel(self)
+            self.wa_start = self.model_config.average.start
+        elif self.model_config.average.type == "ema":
+            ema_avg = lambda averaged_model_parameter, model_parameter, num_averaged: 0.01 * averaged_model_parameter + 0.99 * model_parameter
+            self.wa_model = AveragedModel(self, avg_fn=ema_avg)
+            self.wa_start = self.model_config.average.start
+        elif self.model_config.average is None:
+            self.wa_model = None
+            self.wa_start = None
+        
+    def forward(self,x):
+        out = self.pretrained(x)
+#         out = out.view(out.size(0), -1) # reshape for linear. timm already returns with CHW flatten
+        out = torch.nn.Dropout(self.dropout)(out)
+        out = self.linear_1(out)
+        out = self.prelu(out)
+        out = self.linear_2(out)
+        
+        return out
+    
+    
+    def training_step(self, batch, batch_idx):
+        """
+        logic instead batch loop
+        """
+        # retrieve optimizers and schedulers
+        opt = self.optimizers()
+        opt.zero_grad()
+        
+        
+        loss, pred, labels = self.__share_step(batch, 'train')
+        self.manual_backward(loss)
+        opt.step()
+        
+        return {'loss': loss, 'pred': pred, 'labels': labels}
+        
+    def validation_step(self, batch, batch_idx):
+        """
+        logic instead batch loop for validation
+        """
+        
+        loss, pred, labels = self.__share_step(batch, 'val')
+        return {'loss': loss, 'pred': pred, 'labels': labels}
+    
+    def __share_step(self, batch, mode):
+        images, labels = batch
+        labels = labels.float() / 100.0
+        
+        # check for mixup and only for train
+        # autocast for more effective training / memory usage
+        # https://effectivemachinelearning.com/PyTorch/8._Faster_training_with_mixed_precision
+        # https://pytorch.org/docs/stable/notes/amp_examples.html
+        # https://www.kaggle.com/c/petfinder-pawpularity-score/discussion/291159
+
+        if (self.mixup_alpha is not None) & (mode == "train"):
+            # perform mixup
+            x,y = mixup(images,labels,alpha=self.mixup_alpha,device= self.device)
+            with torch.cuda.amp.autocast(enabled=True):
+                logits = self.forward(x).squeeze(1)
+                loss = self._criterion(logits, y)
+        else:
+            with torch.cuda.amp.autocast(enabled=True):
+                logits = self.forward(images).squeeze(1)
+                loss = self._criterion(logits, labels)
+        
+        # return logloss for training mode, scaled for others
+        pred = logits.sigmoid().detach().cpu() * 100.
+        labels = labels.detach().cpu() * 100.
+        return loss, pred, labels
+        
+    def training_epoch_end(self, outputs):
+        """
+        called every end of epoch, contains logic
+        at end of epoch
+        """
+        
+
+        # update scheduler , parameters
+        
+        # sch = self.lr_schedulers()[0]
+        # swa_sch = self.lr_schedulers()
+        if self.wa_model is not None:
+            if self.current_epoch > self.wa_start:
+                self.wa_model.update_parameters(self)
+                # swa_sch.step()
+        # else:
+        #     sch.step()
+
+        self.__share_epoch_end(outputs, mode = 'train')
+
+
+    def validation_epoch_end(self, outputs):
+        self.__share_epoch_end(outputs, mode = 'val')    
+        
+    def __share_epoch_end(self, outputs, mode):
+        """
+        output is a list of output defined in
+        `training_step` as well as `validation_step`.
+        Need to iterate through each iteration's output.
+        the output was a dict
+        """
+        preds = []
+        labels = []
+        losses = []
+        for out in outputs:
+            pred, label, loss = out['pred'], out['labels'], out["loss"]
+            preds.append(pred)
+            labels.append(label)
+            losses.append(loss.view(-1,1))
+        preds = torch.cat(preds)
+        labels = torch.cat(labels)
+        losses = torch.cat(losses)
+        if mode == "train":
+            loglogss_metrics = losses.mean() # average logloss across iterations
+            self.log(f'{mode}_logloss', loglogss_metrics, prog_bar=True)
+        else:
+            print(f"{mode}: skip logging for logloss")
+            
+        # RMSE
+        metrics = torch.sqrt(((labels - preds) ** 2).mean())
+        # https://pytorch-lightning.readthedocs.io/en/stable/extensions/logging.html
+        # automatic accumulation at end of epoch for training, true always for test,validation loops
+        self.log(f'{mode}_RMSE_loss', metrics, prog_bar=True)
+        
+        
+    def configure_optimizers(self):
+        """
+        https://pytorch-lightning.readthedocs.io/en/latest/api/pytorch_lightning.core.lightning.html#pytorch_lightning.core.lightning.LightningModule.configure_optimizers
+        
+        Any of these 6 options.
+
+        Single optimizer.
+
+        List or Tuple of optimizers.
+
+        Two lists - The first list has multiple optimizers, and the second has multiple LR schedulers (or multiple lr_scheduler_config).
+
+        Dictionary, with an "optimizer" key, and (optionally) a "lr_scheduler" key whose value is a single LR scheduler or lr_scheduler_config.
+
+        Tuple of dictionaries as described above, with an optional "frequency" key.
+
+        None - Fit will run without any optimizer.
+        """
+        #opt = torch.optim.Adam(self.parameters())
+        # TODO: add learning rate to config
+        opt = torch.optim.AdamW(self.parameters(),lr=self.lr)
+        # scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(opt,T_0=20,eta_min=1e-4)
+        # swa_scheduler = SWALR(opt,anneal_strategy="linear", anneal_epochs=5, swa_lr=0.05)
+  
+        return [opt]
+
+
+#################################
+# Inference utility
+#################################
+
+def inference_test(model,valid_loader,criterion,device= "cpu"):
+    """
+    performs inference for submission. Note that because
+    this is test, there is no actual labels
+    """
+    model.eval()
+    y_valid = []
+    y_pred_valid = []
+    for i, (x,y) in enumerate(valid_loader):
+        with torch.no_grad():
+            pred = model(x.to(device))
+            pred = torch.sigmoid(pred) * 100.
+            y_pred_valid.append(pred.squeeze().detach().cpu())
+            y_valid.append(y.detach().cpu())
+    # convert from list to tensor
+    y_valid = torch.cat(y_valid,0)
+    y_pred_valid = torch.cat(y_pred_valid,0)
+    if criterion is None:
+        valid_loss = None
+    else:
+        
+        valid_loss = criterion(y_pred_valid,y_valid).item()
+    
+    return valid_loss,y_pred_valid
+
+def inference_test_ema(model,valid_loader,criterion,device= "cpu"):
+    """
+    variant of inference - uses wa_model for inference
+    """
+    model.eval()
+    y_valid = []
+    y_pred_valid = []
+    for i, (x,y) in enumerate(valid_loader):
+        with torch.no_grad():
+            pred = model.wa_model(x.to(device))
+            pred = torch.sigmoid(pred) * 100.
+            y_pred_valid.append(pred.squeeze().detach().cpu())
+            y_valid.append(y.detach().cpu())
+    # convert from list to tensor
+    y_valid = torch.cat(y_valid,0)
+    y_pred_valid = torch.cat(y_pred_valid,0)
+    if criterion is None:
+        valid_loss = None
+    else:
+        
+        valid_loss = criterion(y_pred_valid,y_valid).item()
+    
+    return valid_loss,y_pred_valid
