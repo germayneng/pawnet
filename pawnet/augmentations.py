@@ -32,11 +32,12 @@ class UseWithProb:
                 image, trg = self.transform(image, trg)
             return image, trg
 
-class AddGaussianNoise(object):
+class AddGaussianNoise(torch.nn.Module):
     """
     https://discuss.pytorch.org/t/how-to-add-noise-to-mnist-dataset-when-using-pytorch/59745/2
     """
     def __init__(self, mean=0., std=1.):
+        super().__init__()
         self.std = std
         self.mean = mean
         
@@ -46,12 +47,38 @@ class AddGaussianNoise(object):
     def __repr__(self):
         return self.__class__.__name__ + '(mean={0}, std={1})'.format(self.mean, self.std)
 
-class normalize(object):
-    def __init__(self,mode="norm"):
-        self.mode = mode
+class MinMaxScalerVectorized(torch.nn.Module):
+    """
+    MinMax Scaler
+
+    Transforms each channel to the range [a, b].
+    https://discuss.pytorch.org/t/using-scikit-learns-scalers-for-torchvision/53455/8
+
+    This solves the nan training loss from my naive implementation since i did not 
+    account for divide by 0 (if max and min are equal)
+    """
+
+    def __init__(self, **kwargs):
+        """
+        Parameters
+        ==========
+        feature_range : tuple
+            Desired range of transformed data.
+        """
+        self.__dict__.update(kwargs)
 
     def __call__(self, tensor):
-        return (tensor - torch.min(tensor)) / (torch.max(tensor) - torch.min(tensor))
+        # Feature range
+        a, b = self.feature_range
+
+        dist = tensor.max(dim=0, keepdim=True)[0] - tensor.min(dim=0, keepdim=True)[0]
+        dist[dist == 0.0] = 1.0
+        scale = 1.0 / dist
+        tensor.mul_(scale).sub_(tensor.min(dim=0, keepdim=True)[0])
+        tensor.mul_(b - a).add_(a)
+
+        return tensor * 255 # added this just to scale back to [0,255]
+
 
 def get_augmentation(train=True,method="basic"):
     """
@@ -67,7 +94,6 @@ def get_augmentation(train=True,method="basic"):
                 T.RandomAffine(15, translate=(0.1, 0.1), scale=(0.9, 1.1)),
                 T.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1),
                 T.ConvertImageDtype(torch.float),
-                normalize(),
                 T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225] ), # imgnet requirements 
             ]
         )
@@ -75,7 +101,6 @@ def get_augmentation(train=True,method="basic"):
             transformations = T.Compose([
                 T.Resize([224,224]),# imgnet needs at least 224
                 T.ConvertImageDtype(torch.float),
-                normalize(),
                 T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225] ), # imgnet requirements 
                 ]
             )
@@ -85,13 +110,14 @@ def get_augmentation(train=True,method="basic"):
             transformations = T.Compose(
             [
                 T.Resize([224,224]),# imgnet needs at least 224
-                T.RandomApply(torch.nn.ModuleList([AddGaussianNoise(mean=0,std=0.3)]),p=0.5),
+                # T.RandomApply(torch.nn.ModuleList([AddGaussianNoise(mean=0,std=0.3)]),p=0.5),
                 T.RandomHorizontalFlip(), 
                 T.RandomVerticalFlip(),
                 T.RandomAffine(15, translate=(0.1, 0.1), scale=(0.9, 1.1)),
                 T.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1),
-                T.RandomApply(torch.nn.ModuleList([T.RandomResizedCrop(size=(224,224),scale=(0.8,1),ratio = (1.7, 2.3))]),p=0.33),
+                T.RandomApply(torch.nn.ModuleList([T.RandomResizedCrop(size=(224,224),scale=(0.8,1))]),p=0.5),
                 T.ConvertImageDtype(torch.float),
+                # MinMaxScalerVectorized(feature_range = (0.,1.)),
                 T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225] ), # imgnet requirements 
             ]
         )
@@ -99,6 +125,7 @@ def get_augmentation(train=True,method="basic"):
             transformations = T.Compose([
                 T.Resize([224,224]),# imgnet needs at least 224
                 T.ConvertImageDtype(torch.float),
+                # MinMaxScalerVectorized(feature_range = (0.,1.)),
                 T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225] ), # imgnet requirements 
                 ]
             )

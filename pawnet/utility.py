@@ -31,8 +31,13 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 from torch.optim.swa_utils import AveragedModel, SWALR
+from torch.nn.modules.module import Module
+from torch.utils.data.dataset import Dataset
 
 from timm import create_model
+
+
+
 
 
 
@@ -134,7 +139,10 @@ class PetfinderDataModule(LightningDataModule):
         train_transformation,
         test_transformation,
         batch_size = 64,
-        num_workers = 2
+        num_workers = 2,
+        cutmix_num_mix=None,
+        cutmix_prob=None,
+        cutmix_beta=None
     ):
         super().__init__()
         self.img_dir = img_dir
@@ -144,10 +152,16 @@ class PetfinderDataModule(LightningDataModule):
         self.test_transformation = test_transformation
         self.batch_size = batch_size
         self.num_workers = num_workers
+        self.cutmix_num_mix = cutmix_num_mix
+        self.cutmix_prob = cutmix_prob
+        self.cutmix_beta = cutmix_beta
+
 
 
     def train_dataloader(self):
         train_data = pawnetDataset(annotation_df=self._train_df,img_dir = self.img_dir ,transform = self.train_transformation) # can set custom len to let model exceed training size (since we are augmenting)
+        if (self.cutmix_num_mix is not None):
+            train_data = CutMix(dataset=train_data,num_class=None,num_mix=self.cutmix_num_mix,beta=self.cutmix_beta,prob=self.cutmix_prob)
         return torch.utils.data.DataLoader(train_data,batch_size=self.batch_size,num_workers =self.num_workers, shuffle=True, pin_memory=False)
 
     def val_dataloader(self):
@@ -216,6 +230,16 @@ class pawNetBasic(pl.LightningModule):
             self.mixup_alpha = self.model_config.mixup.alpha
         else:
             self.mixup_alpha = None
+        # get cutmix parameter
+        if self.model_config.cutmix is not None:
+            print("will perform cutmix")
+            self.cutmix_num_mix = self.model_config.cutmix.num_mix
+            self.cutmix_prob = self.model_config.cutmix.prob
+            self.cutmix_beta = self.model_config.cutmix.beta
+        else:
+            self.cutmix_num_mix = None
+            self.cutmix_prob = None
+            self.cutmix_beta = None
 
         
         # create layers based on pretrained model selected (this affects the feature map size)
@@ -255,7 +279,7 @@ class pawNetBasic(pl.LightningModule):
     
     def __share_step(self, batch, mode):
         images, labels = batch
-        labels = labels.float() / 100.0
+        
         
         # check for mixup and only for train
         # autocast for more effective training / memory usage
@@ -265,11 +289,18 @@ class pawNetBasic(pl.LightningModule):
 
         if (self.mixup_alpha is not None) & (mode == "train"):
             # perform mixup
+            labels = labels.float() / 100.0
             x,y = mixup(images,labels,alpha=self.mixup_alpha,device= self.device)
             with torch.cuda.amp.autocast(enabled=True):
                 logits = self.forward(x).squeeze(1)
                 loss = self._criterion(logits, y)
+        elif (self.cutmix_num_mix is not None) & (mode == "train"):
+            # dont need to scale as labels are scaled in cutmix function
+            with torch.cuda.amp.autocast(enabled=True):
+                logits = self.forward(images).squeeze(1)
+                loss = self._criterion(logits, labels)
         else:
+            labels = labels.float() / 100.0
             with torch.cuda.amp.autocast(enabled=True):
                 logits = self.forward(images).squeeze(1)
                 loss = self._criterion(logits, labels)
@@ -442,6 +473,16 @@ class pawNetAdvance(pl.LightningModule):
             self.mixup_alpha = self.model_config.mixup.alpha
         else:
             self.mixup_alpha = None
+        # get cutmix parameter
+        if self.model_config.cutmix is not None:
+            print("will perform cutmix")
+            self.cutmix_num_mix = self.model_config.cutmix.num_mix
+            self.cutmix_prob = self.model_config.cutmix.prob
+            self.cutmix_beta = self.model_config.cutmix.beta
+        else:
+            self.cutmix_num_mix = None
+            self.cutmix_prob = None
+            self.cutmix_beta = None
 
         # create layers based on pretrained model selected (this affects the feature map size)
         # self.global_avg_pooling = torch.nn.AdaptiveAvgPool2d(1) # timm pretrain comes with pooling    
@@ -501,7 +542,7 @@ class pawNetAdvance(pl.LightningModule):
     
     def __share_step(self, batch, mode):
         images, labels = batch
-        labels = labels.float() / 100.0
+        
         
         # check for mixup and only for train
         # autocast for more effective training / memory usage
@@ -510,12 +551,19 @@ class pawNetAdvance(pl.LightningModule):
         # https://www.kaggle.com/c/petfinder-pawpularity-score/discussion/291159
 
         if (self.mixup_alpha is not None) & (mode == "train"):
+            labels = labels.float() / 100.0
             # perform mixup
             x,y = mixup(images,labels,alpha=self.mixup_alpha,device= self.device)
             with torch.cuda.amp.autocast(enabled=True):
                 logits = self.forward(x).squeeze(1)
                 loss = self._criterion(logits, y)
+        elif (self.cutmix_num_mix is not None) & (mode == "train"):
+            # dont need to scale as labels are scaled in cutmix function
+            with torch.cuda.amp.autocast(enabled=True):
+                logits = self.forward(images).squeeze(1)
+                loss = self._criterion(logits, labels)
         else:
+            labels = labels.float() / 100.0
             with torch.cuda.amp.autocast(enabled=True):
                 logits = self.forward(images).squeeze(1)
                 loss = self._criterion(logits, labels)
@@ -814,6 +862,115 @@ class pawNetNovel(pl.LightningModule):
         # swa_scheduler = SWALR(opt,anneal_strategy="linear", anneal_epochs=5, swa_lr=0.05)
   
         return [opt]
+
+
+#################################
+# Cutmix 
+# https://github.com/ildoonet/cutmix/blob/master/cutmix/utils.py
+#################################
+
+class CutMix(Dataset):
+    """
+    We scale the data within this function
+    """
+    def __init__(self, dataset, num_class =None, num_mix=1, beta=1., prob=1.0):
+        self.dataset = dataset
+        self.num_class = num_class
+        self.num_mix = num_mix
+        self.beta = beta
+        self.prob = prob
+
+    def __getitem__(self, index):
+        img, lb = self.dataset[index]
+        lb = lb / 100. # scale label
+        # lb_onehot = onehot(self.num_class, lb)
+
+        for _ in range(self.num_mix):
+            r = np.random.rand(1)
+            if self.beta <= 0 or r > self.prob:
+                continue
+
+            # generate mixed sample
+            lam = np.random.beta(self.beta, self.beta)
+            rand_index = random.choice(range(len(self)))
+
+            img2, lb2 = self.dataset[rand_index]
+            lb2 = lb2 / 100. # scale label
+            # lb2_onehot = onehot(self.num_class, lb2)
+
+            bbx1, bby1, bbx2, bby2 = rand_bbox(img.size(), lam)
+            img[:, bbx1:bbx2, bby1:bby2] = img2[:, bbx1:bbx2, bby1:bby2]
+            lam = 1 - ((bbx2 - bbx1) * (bby2 - bby1) / (img.size()[-1] * img.size()[-2]))
+            lb = lb * lam + lb2 * (1. - lam)
+
+        return img, lb
+
+    def __len__(self):
+        return len(self.dataset)
+
+class CutMixCrossEntropyLoss(Module):
+    def __init__(self, size_average=True):
+        super().__init__()
+        self.size_average = size_average
+
+    def forward(self, input, target):
+        if len(target.size()) == 1:
+            target = torch.nn.functional.one_hot(target, num_classes=input.size(-1))
+            target = target.float().cuda()
+        return cross_entropy(input, target, self.size_average)
+
+
+def cross_entropy(input, target, size_average=True):
+    """ Cross entropy that accepts soft targets
+    Args:
+         pred: predictions for neural network
+         targets: targets, can be soft
+         size_average: if false, sum is returned instead of mean
+    Examples::
+        input = torch.FloatTensor([[1.1, 2.8, 1.3], [1.1, 2.1, 4.8]])
+        input = torch.autograd.Variable(out, requires_grad=True)
+        target = torch.FloatTensor([[0.05, 0.9, 0.05], [0.05, 0.05, 0.9]])
+        target = torch.autograd.Variable(y1)
+        loss = cross_entropy(input, target)
+        loss.backward()
+    """
+    logsoftmax = torch.nn.LogSoftmax(dim=1)
+    if size_average:
+        return torch.mean(torch.sum(-target * logsoftmax(input), dim=1))
+    else:
+        return torch.sum(torch.sum(-target * logsoftmax(input), dim=1))
+
+
+def onehot(size, target):
+    vec = torch.zeros(size, dtype=torch.float32)
+    vec[target] = 1.
+    return vec
+
+
+def rand_bbox(size, lam):
+    if len(size) == 4:
+        W = size[2]
+        H = size[3]
+    elif len(size) == 3:
+        W = size[1]
+        H = size[2]
+    else:
+        raise Exception
+
+    cut_rat = np.sqrt(1. - lam)
+    cut_w = np.int(W * cut_rat)
+    cut_h = np.int(H * cut_rat)
+
+    # uniform
+    cx = np.random.randint(W)
+    cy = np.random.randint(H)
+
+    bbx1 = np.clip(cx - cut_w // 2, 0, W)
+    bby1 = np.clip(cy - cut_h // 2, 0, H)
+    bbx2 = np.clip(cx + cut_w // 2, 0, W)
+    bby2 = np.clip(cy + cut_h // 2, 0, H)
+
+    return bbx1, bby1, bbx2, bby2
 
 
 #################################

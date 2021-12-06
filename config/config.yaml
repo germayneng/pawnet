@@ -90,6 +90,23 @@ model:
     feature_map_out_size: 768 # the last feature map dim size
     mixup:
       alpha: 0.4
+  # cut mix experiments ============================================================
+  swin_tiny4_w7_224_cut1:
+    model_name: pawnet_lightning_swin_tiny4_w7_224_cutmix1 # for tensorboard
+    pretrained: swin_tiny_patch4_window7_224
+    n_splits: 5 # skf
+    epoch: 20
+    batch_size: 64
+    num_workers: 4
+    # params
+    dropout: 0.2
+    learning_rate: 0.00001
+    feature_map_out_size: 768 # the last feature map dim size
+    mixup: null
+    cutmix:
+      num_mix: 2
+      prob: 0.5
+      beta: 1.0
   # AVG models ==========================================================
   swin_tiny4_w7_224_m04_swa:
     model_name: swin_tiny4_w7_224_mixup04_swa # for tensorboard
