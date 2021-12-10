@@ -115,7 +115,13 @@ class pawnetDataset(torch.utils.data.Dataset):
     def __getitem__(self,idx):
         """called batch num of times"""
         img_path = os.path.join(self.img_dir, self.annotation_df.iloc[idx, 0]) # ID is column index 0
-        image = read_image(img_path+".jpg")
+        with open(img_path, 'rb') as f:
+            img = Image.open(f)
+            img = (img).convert("RGB")
+            image = transforms.ToTensor()(img)
+            f.close()
+        if image.shape[0]==1:
+            image = image.expand(3,-1,-1)
         if self.test:
             label = 0
         else:
