@@ -15,6 +15,7 @@ model:
     learning_rate: 0.00001
     feature_map_out_size: 512 # the last feature map dim size
     mixup: null # disable mixup if null
+    cutmix: null
   densenet121:
     model_name: pawnet_lightning_densenet # for tensorboard
     pretrained: densenet121
@@ -27,6 +28,7 @@ model:
     learning_rate: 0.00001
     feature_map_out_size: 1024 # the last feature map dim size
     mixup: null
+    cutmix: null
   vit_tiny16_224:
     model_name: pawnet_lightning_vit_tiny_patch16_224 # for tensorboard
     pretrained: vit_tiny_patch16_224
@@ -39,6 +41,7 @@ model:
     learning_rate: 0.00001
     feature_map_out_size: 192 # the last feature map dim size
     mixup: null
+    cutmix: null
   efficientnet_b0:
     model_name: pawnet_lightning_efficientnet_b0 # for tensorboard
     pretrained: efficientnet_b0
@@ -51,6 +54,7 @@ model:
     learning_rate: 0.00001
     feature_map_out_size: 1280 # the last feature map dim size
     mixup: null
+    cutmix: null
   swin_tiny4_w7_224:
     model_name: pawnet_lightning_swin_tiny4_w7_224 # for tensorboard
     pretrained: swin_tiny_patch4_window7_224
@@ -63,6 +67,7 @@ model:
     learning_rate: 0.00001
     feature_map_out_size: 768 # the last feature map dim size
     mixup: null
+    cutmix: null
   # mix up experiments ==========================================================
   swin_tiny4_w7_224_m02:
     model_name: pawnet_lightning_swin_tiny4_w7_224_mixup02 # for tensorboard
