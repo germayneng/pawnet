@@ -35,7 +35,8 @@ from torch.nn.modules.module import Module
 from torch.utils.data.dataset import Dataset
 
 from timm import create_model
-
+from PIL import Image
+from torchvision import transforms
 
 
 
